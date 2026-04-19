@@ -48,8 +48,7 @@ services:
     volumes:
       - replay_data:/data
 
-  # USB Serial → POST /hooks/replay-trigger (Linux + placa ligada). Não use no Docker Desktop Mac sem device USB.
-  # Subir: docker compose --profile bridge up -d
+  # USB Serial → POST /hooks/replay-trigger (perfil bridge). Ative com COMPOSE_PROFILES=bridge no .env ou: docker compose --profile bridge up
   replay-bridge:
     profiles:
       - bridge

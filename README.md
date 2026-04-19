@@ -48,6 +48,8 @@ Se você copia a pasta via pendrive/zip, mantenha a estrutura do projeto e vá p
    | `ADMIN_PASSWORD` | Senha do painel admin |
    | `REPLAY_HOOK_SECRET` | Segredo do `POST /hooks/replay-trigger` (mesmo valor no `curl` e no bridge serial) |
    | `PUBLIC_BASE_URL` | URL **absoluta** da API na rede da quadra (ex.: `http://192.168.0.10:8000`) para links no WhatsApp; pode ficar vazio para usar o host da requisição ao abrir `/` |
+   | `COMPOSE_PROFILES` | Defina `bridge` para subir o serviço **replay-bridge** (USB do botão) junto com `docker compose up`, sem passar `--profile` na linha de comando |
+   | `SERIAL_DEVICE` | (Opcional) Caminho do dispositivo serial no host Linux (padrão `/dev/ttyUSB0`) quando usa o replay-bridge no Docker |
 
    Outras variáveis estão comentadas em [`.env.example`](.env.example).
 
@@ -63,13 +65,16 @@ Na **raiz** do repositório:
 docker compose up --build -d
 ```
 
-Isso sobe três serviços:
+O [`.env.example`](.env.example) inclui **`COMPOSE_PROFILES=bridge`**, então esse comando também sobe o **replay-bridge** (escuta a USB e envia o POST do botão). Se não quiser o bridge no Docker (ex.: Mac sem serial), remova ou comente `COMPOSE_PROFILES` no `.env`.
+
+Isso sobe os serviços principais:
 
 | Serviço | Função |
 |---------|--------|
 | `recorder` | Lê o RTSP e grava segmentos `.mkv` em `/data/segments` |
 | `api` | FastAPI + painel em `http://localhost:8000/` |
 | `worker` | Processa fila de cortes e gera MP4 em `/data/clips` |
+| `replay-bridge` | (Com perfil `bridge` ativo) Bridge serial USB → `POST /hooks/replay-trigger` |
 
 Dados persistidos no volume Docker **`replay_data`**: SQLite (`app.db`), segmentos e clips.
 
@@ -153,17 +158,19 @@ python3 scripts/serial_replay_bridge.py
 - O processo **fica em loop**; deixe o terminal aberto ou use **systemd** no Linux ([`scripts/serial-replay-bridge.service.example`](scripts/serial-replay-bridge.service.example)).
 - Se a API estiver em outro IP, use `REPLAY_URL=http://192.168.x.x:8000/hooks/replay-trigger`.
 
-### 7.2 Rodar o bridge junto do Docker (Linux + USB)
+### 7.2 Bridge dentro do Docker (Linux + USB)
 
-Só faz sentido com **dispositivo serial no host** (mini‑PC Linux):
+Com **`COMPOSE_PROFILES=bridge`** no `.env` (já vem no [`.env.example`](.env.example)), o comando usual já sobe o bridge:
 
 ```bash
-docker compose --profile bridge up -d --build
+docker compose up -d --build
 ```
 
-Ajuste `SERIAL_DEVICE` no `.env` se a porta não for `/dev/ttyUSB0`.
+Equivalente explícito: `docker compose --profile bridge up -d --build`.
 
-No **Docker Desktop (Mac/Windows)** o mapeamento USB costuma falhar; use o script no **host** (secção 7.1).
+Ajuste **`SERIAL_DEVICE`** no `.env` se a porta não for `/dev/ttyUSB0` (ex.: `/dev/serial/by-id/...`).
+
+No **Docker Desktop (Mac/Windows)** o mapeamento USB costuma falhar — **comente ou remova** `COMPOSE_PROFILES=bridge` no `.env` e use o script no **host** (secção 7.1).
 
 ---
 
@@ -239,7 +246,7 @@ PAYMENT_WEBHOOK_SECRET=seu_segredo python3 scripts/sign_webhook_body.py 1
 | `backend/app/` | API FastAPI, modelos, worker |
 | `recorder/` | Gravador RTSP → segmentos |
 | `scripts/` | Bridge serial, exemplos systemd, Dockerfile do bridge |
-| `docker-compose.yml` | Serviços `recorder`, `api`, `worker`, opcional `replay-bridge` (perfil `bridge`) |
+| `docker-compose.yml` | Serviços `recorder`, `api`, `worker`, `replay-bridge` (ativado por `COMPOSE_PROFILES=bridge` no `.env`) |
 
 ---
 
