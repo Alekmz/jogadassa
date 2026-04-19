@@ -1,0 +1,49 @@
+services:
+  recorder:
+    build:
+      context: ./recorder
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      RTSP_URL: ${RTSP_URL:?set RTSP_URL in .env}
+      DATA_DIR: /data
+      SEGMENT_SECONDS: ${SEGMENT_SECONDS:-300}
+      RETENTION_DAYS: ${RETENTION_DAYS:-14}
+    volumes:
+      - replay_data:/data
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      DATABASE_URL: sqlite:////data/app.db
+      DATA_DIR: /data
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-change-me}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-changeme}
+      DOWNLOAD_TOKEN_EXPIRE_SECONDS: ${DOWNLOAD_TOKEN_EXPIRE_SECONDS:-86400}
+      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-manual}
+      PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-webhook-secret-change}
+      BUSINESS_MODE: ${BUSINESS_MODE:-custom}
+    volumes:
+      - replay_data:/data
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "app.worker_main"]
+    environment:
+      DATABASE_URL: sqlite:////data/app.db
+      DATA_DIR: /data
+      SEGMENT_SECONDS: ${SEGMENT_SECONDS:-300}
+    volumes:
+      - replay_data:/data
+
+volumes:
+  replay_data:
