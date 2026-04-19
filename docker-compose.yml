@@ -59,13 +59,13 @@ services:
     depends_on:
       - api
     environment:
-      SERIAL_PORT: /dev/ttyUSB0
+      SERIAL_PORT: /dev/ttyACM0
       SERIAL_BAUD: ${SERIAL_BAUD:-115200}
       REPLAY_URL: http://api:8000/hooks/replay-trigger
       REPLAY_HOOK_SECRET: ${REPLAY_HOOK_SECRET:-dev-replay-secret-change-me}
       REPLAY_SERIAL_COMMAND: ${REPLAY_SERIAL_COMMAND:-REPLAY_CUT}
     devices:
-      - ${SERIAL_DEVICE:-/dev/ttyUSB0}:/dev/ttyUSB0
+      - ${SERIAL_DEVICE:-/dev/ttyACM0}:/dev/ttyACM0
 
 volumes:
   replay_data:
