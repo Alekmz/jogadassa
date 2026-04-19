@@ -29,6 +29,9 @@ services:
       PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-manual}
       PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-webhook-secret-change}
       BUSINESS_MODE: ${BUSINESS_MODE:-custom}
+      REPLAY_TRIGGER_WINDOW_SECONDS: ${REPLAY_TRIGGER_WINDOW_SECONDS:-30}
+      REPLAY_HOOK_SECRET: ${REPLAY_HOOK_SECRET:-dev-replay-secret-change-me}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
     volumes:
       - replay_data:/data
 
@@ -44,6 +47,26 @@ services:
       SEGMENT_SECONDS: ${SEGMENT_SECONDS:-300}
     volumes:
       - replay_data:/data
+
+  # USB Serial → POST /hooks/replay-trigger (Linux + placa ligada). Não use no Docker Desktop Mac sem device USB.
+  # Subir: docker compose --profile bridge up -d
+  replay-bridge:
+    profiles:
+      - bridge
+    build:
+      context: ./scripts
+      dockerfile: Dockerfile.replay-bridge
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      SERIAL_PORT: /dev/ttyUSB0
+      SERIAL_BAUD: ${SERIAL_BAUD:-115200}
+      REPLAY_URL: http://api:8000/hooks/replay-trigger
+      REPLAY_HOOK_SECRET: ${REPLAY_HOOK_SECRET:-dev-replay-secret-change-me}
+      REPLAY_SERIAL_COMMAND: ${REPLAY_SERIAL_COMMAND:-REPLAY_CUT}
+    devices:
+      - ${SERIAL_DEVICE:-/dev/ttyUSB0}:/dev/ttyUSB0
 
 volumes:
   replay_data:

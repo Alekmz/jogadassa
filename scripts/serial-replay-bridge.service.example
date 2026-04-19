@@ -1,0 +1,25 @@
+# Exemplo de unidade systemd (Linux no mini-PC da quadra).
+# O bridge precisa ficar rodando o tempo todo: ele fica em loop aguardando a serial.
+#
+# 1. Copie para /etc/systemd/system/serial-replay-bridge.service e ajuste caminhos/usuário.
+# 2. Crie /etc/default/serial-replay-bridge (veja serial-replay-bridge.env.example).
+# 3: sudo systemctl daemon-reload && sudo systemctl enable --now serial-replay-bridge.service
+#
+# Se a porta USB mudar após reboot, use regra udev ou um nome estável (/dev/serial/by-id/...).
+
+[Unit]
+Description=Jogadassa serial bridge (ESP32 → replay hook)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=3
+# User=quadra
+# WorkingDirectory=/opt/jogadassa
+EnvironmentFile=-/etc/default/serial-replay-bridge
+ExecStart=/usr/bin/python3 /opt/jogadassa/scripts/serial_replay_bridge.py
+
+[Install]
+WantedBy=multi-user.target

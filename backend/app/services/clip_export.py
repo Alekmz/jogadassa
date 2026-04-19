@@ -9,6 +9,8 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from app.config import get_settings
+
 SEGMENT_RE = re.compile(r"segment_(\d{8})_(\d{6})_part\d+\.mkv$", re.I)
 
 
@@ -23,7 +25,8 @@ def parse_segment_start(path: Path) -> datetime | None:
         return None
 
 
-def ffprobe_duration_seconds(path: Path) -> float:
+def ffprobe_duration_seconds(path: Path) -> float | None:
+    """Duração em segundos, ou None se indisponível (ex.: segmento ainda em gravação → N/A)."""
     r = subprocess.run(
         [
             "ffprobe",
@@ -37,21 +40,57 @@ def ffprobe_duration_seconds(path: Path) -> float:
         ],
         capture_output=True,
         text=True,
-        check=True,
     )
-    return float(r.stdout.strip())
+    if r.returncode != 0:
+        return None
+    s = (r.stdout or "").strip()
+    if not s or s.upper() == "N/A":
+        return None
+    try:
+        v = float(s)
+    except ValueError:
+        return None
+    if v <= 0:
+        return None
+    return v
 
 
-def list_segments(segments_dir: Path) -> list[tuple[Path, datetime, float]]:
+def _estimated_duration_open_segment(
+    path: Path,
+    segment_start: datetime,
+    segment_cap_seconds: float,
+    now: datetime,
+) -> float:
+    """Arquivo em crescimento: ffprobe não tem duration; estima pelo nome (UTC) vs relógio."""
+    try:
+        if path.stat().st_size < 1024:
+            return 0.0
+    except OSError:
+        return 0.0
+    if segment_start.tzinfo is None:
+        segment_start = segment_start.replace(tzinfo=timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    elapsed = (now - segment_start).total_seconds()
+    return max(1.0, min(segment_cap_seconds, elapsed))
+
+
+def list_segments(
+    segments_dir: Path,
+    segment_roll_seconds: int = 300,
+) -> list[tuple[Path, datetime, float]]:
     out: list[tuple[Path, datetime, float]] = []
+    now = datetime.now(timezone.utc)
+    cap = float(max(30, segment_roll_seconds))
     for p in sorted(segments_dir.glob("segment_*.mkv")):
         st = parse_segment_start(p)
         if not st:
             continue
-        try:
-            dur = ffprobe_duration_seconds(p)
-        except (subprocess.CalledProcessError, ValueError):
-            continue
+        dur = ffprobe_duration_seconds(p)
+        if dur is None:
+            dur = _estimated_duration_open_segment(p, st, cap, now)
+            if dur <= 0:
+                continue
         out.append((p, st, dur))
     return out
 
@@ -85,7 +124,12 @@ def export_clip_mp4(
     """
     segments_dir = segments_dir.resolve()
     clips_dir.mkdir(parents=True, exist_ok=True)
-    all_seg = list_segments(segments_dir)
+    if start_utc.tzinfo is None:
+        start_utc = start_utc.replace(tzinfo=timezone.utc)
+    if end_utc.tzinfo is None:
+        end_utc = end_utc.replace(tzinfo=timezone.utc)
+    roll = get_settings().segment_seconds
+    all_seg = list_segments(segments_dir, segment_roll_seconds=roll)
     picked = pick_segments(all_seg, start_utc, end_utc)
     if not picked:
         raise RuntimeError(

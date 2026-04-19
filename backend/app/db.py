@@ -1,6 +1,6 @@
 from collections.abc import Generator
 
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlalchemy.engine import Engine
 from sqlmodel import Session, SQLModel, create_engine
 
@@ -29,8 +29,26 @@ def _sqlite_fk(dbapi_connection, connection_record):  # noqa: ARG001
         cursor.close()
 
 
+def _sqlite_migrate_clipjob() -> None:
+    """Adiciona colunas novas em clipjob sem Alembic (SQLite)."""
+    if not settings.database_url.startswith("sqlite"):
+        return
+    with engine.begin() as conn:
+        rows = conn.execute(text("PRAGMA table_info(clipjob)")).fetchall()
+        col_names = {r[1] for r in rows}
+        if "source" not in col_names:
+            conn.execute(
+                text(
+                    "ALTER TABLE clipjob ADD COLUMN source VARCHAR(32) NOT NULL DEFAULT 'legacy'"
+                )
+            )
+        if "triggered_at_utc" not in col_names:
+            conn.execute(text("ALTER TABLE clipjob ADD COLUMN triggered_at_utc TIMESTAMP"))
+
+
 def init_db() -> None:
     SQLModel.metadata.create_all(engine)
+    _sqlite_migrate_clipjob()
 
 
 def get_session() -> Generator[Session, None, None]:

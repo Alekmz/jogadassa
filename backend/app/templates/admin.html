@@ -23,11 +23,12 @@
 <body>
   <section id="publicOrder">
     <h1>Novo pedido (público)</h1>
-    <p style="font-size:0.85rem;color:#71767b;">Cria pedido com pagamento pendente; o corte só processa após marcar como pago no painel.</p>
-    <label>Início (UTC) <input id="oStart" type="text" placeholder="2025-04-19T15:00:00Z"/></label>
-    <label>Fim (UTC) <input id="oEnd" type="text" placeholder="2025-04-19T16:00:00Z"/></label>
+    <p style="font-size:0.85rem;color:#71767b;">Escolha um replay já gerado pelo botão da quadra (últimos 30s). O download libera após o admin confirmar o pagamento.</p>
+    <button type="button" class="secondary" id="btnRefreshSelectable">Atualizar lista de replays</button>
+    <label>Replay <select id="oClip"><option value="">— carregue a lista —</option></select></label>
     <label>Valor (centavos) <input id="oCents" type="number" value="5000"/></label>
     <label>Observação <input id="oNote" type="text" placeholder="Cliente / partida"/></label>
+    <label>WhatsApp do cliente (opcional, só números com DDI) <input id="oWhatsapp" type="text" placeholder="5511999999999"/></label>
     <button type="button" id="btnOrder">Criar pedido</button>
     <p class="ok" id="orderOk"></p>
     <p class="err" id="orderErr"></p>
@@ -47,7 +48,7 @@
     <button type="button" class="secondary" id="btnLogout">Sair</button>
 
     <h2>Novo corte (admin)</h2>
-    <p style="font-size:0.85rem;color:#71767b;">Datas em UTC (ISO 8601), ex.: 2025-04-19T14:00:00Z</p>
+    <p style="font-size:0.85rem;color:#71767b;">Datas em UTC (ISO 8601), ex.: 2026-04-19T14:00:00Z — corte manual (não aparece na lista pública).</p>
     <label>Início <input id="cStart" type="text" placeholder="2025-04-19T14:00:00Z"/></label>
     <label>Fim <input id="cEnd" type="text" placeholder="2025-04-19T14:45:00Z"/></label>
     <button type="button" id="btnClip">Enfileirar corte</button>
@@ -56,19 +57,26 @@
     <h2>Pedidos</h2>
     <button type="button" class="secondary" id="btnRefresh">Atualizar lista</button>
     <table>
-      <thead><tr><th>ID</th><th>Clip</th><th>Valor</th><th>Status</th><th>Clip job</th><th>Ações</th></tr></thead>
+      <thead><tr><th>ID</th><th>Clip</th><th>Valor</th><th>Status</th><th>Clip</th><th>Origem</th><th>Ações</th></tr></thead>
       <tbody id="ordersBody"></tbody>
     </table>
 
     <h2>Jobs de clip</h2>
     <table>
-      <thead><tr><th>ID</th><th>Início</th><th>Fim</th><th>Status</th><th>Link</th></tr></thead>
+      <thead><tr><th>ID</th><th>Início</th><th>Fim</th><th>Status</th><th>Origem</th><th>Link</th></tr></thead>
       <tbody id="clipsBody"></tbody>
     </table>
   </section>
 
   <script>
     const api = '';
+    const publicBase = {{ public_base_url | tojson }};
+    function whatsappLink(phone, message) {
+      const digits = String(phone || '').replace(/\D/g, '');
+      const q = encodeURIComponent(message);
+      if (digits.length >= 10) return 'https://wa.me/' + digits + '?text=' + q;
+      return 'https://wa.me/?text=' + q;
+    }
     function token() { return localStorage.getItem('token') || ''; }
     function authHeaders() {
       const t = token();
@@ -122,12 +130,23 @@
       if (r.status === 401) { showLogin(); return; }
       const rows = await r.json();
       const tb = document.getElementById('ordersBody');
-      tb.innerHTML = rows.map(o => `<tr>
-        <td>${o.id}</td><td>${o.clip_job_id}</td><td>${(o.amount_cents/100).toFixed(2)}</td><td>${o.status}</td><td>${o.clip_status||''}</td>
-        <td>
-          ${o.status === 'pending_payment' ? `<button data-aid="${o.id}" class="pay">Pago</button> <button data-cid="${o.id}" class="cx">Cancelar</button>` : ''}
-        </td>
-      </tr>`).join('');
+      tb.innerHTML = rows.map(o => {
+        let actions = '';
+        if (o.status === 'pending_payment') {
+          actions += `<button data-aid="${o.id}" class="pay">Pago</button> <button data-cid="${o.id}" class="cx">Cancelar</button> `;
+        }
+        if (o.status === 'paid' && o.download_token) {
+          const downloadUrl = publicBase + '/clips/files/' + o.clip_job_id + '?token=' + encodeURIComponent(o.download_token);
+          const msg = 'Seu replay Jogadassa: ' + downloadUrl;
+          const phone = (o.metadata && o.metadata.whatsapp) ? o.metadata.whatsapp : '';
+          const href = whatsappLink(phone, msg);
+          actions += `<a href="${href}" target="_blank" rel="noopener">WhatsApp</a>`;
+        }
+        return `<tr>
+        <td>${o.id}</td><td>${o.clip_job_id}</td><td>${(o.amount_cents/100).toFixed(2)}</td><td>${o.status}</td><td>${o.clip_status||''}</td><td>${o.clip_source||''}</td>
+        <td>${actions}</td>
+      </tr>`;
+      }).join('');
       tb.querySelectorAll('button.pay').forEach(b => b.onclick = () => markPaid(b.getAttribute('data-aid')));
       tb.querySelectorAll('button.cx').forEach(b => b.onclick = () => cancelOrder(b.getAttribute('data-cid')));
     }
@@ -150,7 +169,7 @@
           const u = api + '/clips/files/' + c.id + '?token=' + encodeURIComponent(c.download_token);
           link = `<a href="${u}">download</a>`;
         }
-        return `<tr><td>${c.id}</td><td>${c.start_utc}</td><td>${c.end_utc}</td><td>${c.status}</td><td>${link}</td></tr>`;
+        return `<tr><td>${c.id}</td><td>${c.start_utc}</td><td>${c.end_utc}</td><td>${c.status}</td><td>${c.source||''}</td><td>${link}</td></tr>`;
       }).join('');
     }
     function refreshAll() {
@@ -159,14 +178,33 @@
       refreshClips();
     }
     document.getElementById('btnRefresh').onclick = refreshAll;
+    async function refreshSelectable() {
+      const sel = document.getElementById('oClip');
+      const cur = sel.value;
+      const r = await fetch(api + '/clips/selectable');
+      if (!r.ok) return;
+      const rows = await r.json();
+      sel.innerHTML = rows.length
+        ? rows.map(x => `<option value="${x.id}">#${x.id} — ${x.triggered_at_utc || x.end_utc}</option>`).join('')
+        : '<option value="">(nenhum replay pronto)</option>';
+      if (cur && [...sel.options].some(o => o.value === cur)) sel.value = cur;
+    }
+    document.getElementById('btnRefreshSelectable').onclick = refreshSelectable;
     document.getElementById('btnOrder').onclick = async () => {
       document.getElementById('orderErr').textContent = '';
       document.getElementById('orderOk').textContent = '';
+      const clipId = parseInt(document.getElementById('oClip').value, 10);
+      if (!clipId) {
+        document.getElementById('orderErr').textContent = 'Selecione um replay na lista.';
+        return;
+      }
+      const wa = document.getElementById('oWhatsapp').value.trim();
+      const metadata = wa ? { whatsapp: wa } : null;
       const body = {
-        start_utc: document.getElementById('oStart').value,
-        end_utc: document.getElementById('oEnd').value,
+        clip_job_id: clipId,
         amount_cents: parseInt(document.getElementById('oCents').value, 10) || 0,
-        customer_note: document.getElementById('oNote').value || null
+        customer_note: document.getElementById('oNote').value || null,
+        metadata: metadata
       };
       const r = await fetch(api + '/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!r.ok) {
@@ -176,6 +214,7 @@
       const j = await r.json();
       document.getElementById('orderOk').textContent = 'Pedido criado: id ' + j.id + ', clip_job ' + j.clip_job_id;
     };
+    refreshSelectable();
     if (token()) showApp(); else showLogin();
   </script>
 </body>

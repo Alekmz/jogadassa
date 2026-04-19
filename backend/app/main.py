@@ -9,7 +9,7 @@ from starlette.requests import Request
 
 from app.config import get_settings
 from app.db import init_db
-from app.routers import auth, clips, health, orders, payments
+from app.routers import auth, clips, health, hooks, orders, payments
 
 s = get_settings()
 templates_dir = Path(__file__).resolve().parent / "templates"
@@ -29,15 +29,19 @@ app = FastAPI(title="Replay Edge", lifespan=lifespan)
 app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(clips.router)
+app.include_router(hooks.router)
 app.include_router(orders.router)
 app.include_router(payments.router)
 
 
 @app.get("/", response_class=HTMLResponse)
 def admin_home(request: Request):
+    base = get_settings().public_base_url.strip()
+    if not base:
+        base = str(request.base_url).rstrip("/")
     return templates.TemplateResponse(
         "admin.html",
-        {"request": request, "api_base": ""},
+        {"request": request, "api_base": "", "public_base_url": base},
     )
 
 

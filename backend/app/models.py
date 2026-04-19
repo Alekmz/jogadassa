@@ -19,6 +19,14 @@ class ClipJobStatus(str, Enum):
     failed = "failed"
 
 
+class ClipJobSource(str, Enum):
+    """Origem do job: só replay_trigger aparece na lista pública de seleção."""
+
+    replay_trigger = "replay_trigger"
+    admin_manual = "admin_manual"
+    legacy = "legacy"
+
+
 class OrderStatus(str, Enum):
     pending_payment = "pending_payment"
     paid = "paid"
@@ -30,6 +38,8 @@ class ClipJob(SQLModel, table=True):
     start_utc: datetime
     end_utc: datetime
     status: ClipJobStatus = ClipJobStatus.queued
+    source: ClipJobSource = Field(default=ClipJobSource.legacy)
+    triggered_at_utc: Optional[datetime] = None
     output_relpath: Optional[str] = None
     error_text: Optional[str] = None
     created_at: datetime = Field(default_factory=utcnow)

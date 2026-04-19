@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from app.config import get_settings
 from app.deps import DbSession, get_current_admin
-from app.models import ClipJob, ClipJobStatus, Order, OrderStatus
+from app.models import ClipJob, ClipJobSource, ClipJobStatus, Order, OrderStatus
 from app.security import create_download_token, decode_download_token
 from sqlmodel import select
 
@@ -25,9 +25,41 @@ class ClipOut(BaseModel):
     start_utc: datetime
     end_utc: datetime
     status: str
+    source: str
+    triggered_at_utc: datetime | None
     output_relpath: str | None
     error_text: str | None
     download_token: str | None = None
+
+
+class SelectableClipOut(BaseModel):
+    """Lista pública: só replays do gatilho já exportados (sem token de download)."""
+
+    id: int
+    start_utc: datetime
+    end_utc: datetime
+    triggered_at_utc: datetime | None
+
+
+@router.get("/selectable", response_model=list[SelectableClipOut])
+def list_selectable_clips(session: DbSession):
+    """Replays do botão já prontos — escolha do cliente no fim da partida."""
+    rows = session.exec(
+        select(ClipJob)
+        .where(ClipJob.source == ClipJobSource.replay_trigger)
+        .where(ClipJob.status == ClipJobStatus.done)
+        .order_by(ClipJob.id.desc())
+        .limit(100)
+    ).all()
+    return [
+        SelectableClipOut(
+            id=r.id,
+            start_utc=r.start_utc,
+            end_utc=r.end_utc,
+            triggered_at_utc=r.triggered_at_utc,
+        )
+        for r in rows
+    ]
 
 
 def _clip_out(job: ClipJob, include_token: bool = False) -> ClipOut:
@@ -39,6 +71,8 @@ def _clip_out(job: ClipJob, include_token: bool = False) -> ClipOut:
         start_utc=job.start_utc,
         end_utc=job.end_utc,
         status=job.status.value,
+        source=job.source.value,
+        triggered_at_utc=job.triggered_at_utc,
         output_relpath=job.output_relpath,
         error_text=job.error_text,
         download_token=token,
@@ -54,7 +88,11 @@ def create_admin_clip(
     """Corte sem pedido: entra na fila e processa quando não houver bloqueio de pagamento."""
     if body.end_utc <= body.start_utc:
         raise HTTPException(400, "end_utc deve ser maior que start_utc")
-    job = ClipJob(start_utc=body.start_utc, end_utc=body.end_utc)
+    job = ClipJob(
+        start_utc=body.start_utc,
+        end_utc=body.end_utc,
+        source=ClipJobSource.admin_manual,
+    )
     session.add(job)
     session.commit()
     session.refresh(job)

@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -6,15 +5,15 @@ from pydantic import BaseModel, Field
 from sqlmodel import select
 
 from app.deps import DbSession, get_current_admin
-from app.models import ClipJob, ClipJobStatus, Order, OrderStatus, utcnow
+from app.models import ClipJob, ClipJobSource, ClipJobStatus, Order, OrderStatus, utcnow
+from app.security import create_download_token
 from app.services.payment import mark_order_paid
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
 
 class OrderCreate(BaseModel):
-    start_utc: datetime
-    end_utc: datetime
+    clip_job_id: int = Field(gt=0)
     amount_cents: int = Field(ge=0)
     customer_note: str | None = None
     metadata: dict[str, Any] | None = None
@@ -26,18 +25,48 @@ class OrderOut(BaseModel):
     amount_cents: int
     status: str
     customer_note: str | None
+    metadata: dict[str, Any] | None = None
     clip_status: str | None = None
+    clip_source: str | None = None
+    download_token: str | None = None
+
+
+def _order_out(session: DbSession, order: Order) -> OrderOut:
+    job = session.get(ClipJob, order.clip_job_id)
+    token = None
+    if (
+        order.status == OrderStatus.paid
+        and job
+        and job.status == ClipJobStatus.done
+        and job.output_relpath
+    ):
+        token = create_download_token(job.id)
+    return OrderOut(
+        id=order.id,
+        clip_job_id=order.clip_job_id,
+        amount_cents=order.amount_cents,
+        status=order.status.value,
+        customer_note=order.customer_note,
+        metadata=order.metadata_json,
+        clip_status=job.status.value if job else None,
+        clip_source=job.source.value if job else None,
+        download_token=token,
+    )
 
 
 @router.post("", response_model=OrderOut)
 def create_order(body: OrderCreate, session: DbSession):
-    """Cliente/quadra cria pedido; clip só processa após pagamento confirmado."""
-    if body.end_utc <= body.start_utc:
-        raise HTTPException(400, "end_utc deve ser maior que start_utc")
-    job = ClipJob(start_utc=body.start_utc, end_utc=body.end_utc)
-    session.add(job)
-    session.commit()
-    session.refresh(job)
+    """Cliente escolhe um replay já exportado (gatilho da quadra)."""
+    job = session.get(ClipJob, body.clip_job_id)
+    if not job:
+        raise HTTPException(404, "Clip não encontrado")
+    if job.source != ClipJobSource.replay_trigger:
+        raise HTTPException(400, "Só é possível pedir replays gerados pelo gatilho da quadra")
+    if job.status != ClipJobStatus.done:
+        raise HTTPException(400, "Replay ainda não está pronto; aguarde o processamento")
+    existing = session.exec(select(Order).where(Order.clip_job_id == job.id)).first()
+    if existing and existing.status in (OrderStatus.pending_payment, OrderStatus.paid):
+        raise HTTPException(409, "Já existe pedido ativo para este replay")
     order = Order(
         clip_job_id=job.id,
         amount_cents=body.amount_cents,
@@ -48,14 +77,7 @@ def create_order(body: OrderCreate, session: DbSession):
     session.add(order)
     session.commit()
     session.refresh(order)
-    return OrderOut(
-        id=order.id,
-        clip_job_id=order.clip_job_id,
-        amount_cents=order.amount_cents,
-        status=order.status.value,
-        customer_note=order.customer_note,
-        clip_status=job.status.value,
-    )
+    return _order_out(session, order)
 
 
 @router.get("/admin", response_model=list[OrderOut])
@@ -64,20 +86,7 @@ def list_orders(
     _admin: Annotated[str, Depends(get_current_admin)],
 ):
     orders = session.exec(select(Order).order_by(Order.id.desc()).limit(200)).all()
-    out: list[OrderOut] = []
-    for o in orders:
-        job = session.get(ClipJob, o.clip_job_id)
-        out.append(
-            OrderOut(
-                id=o.id,
-                clip_job_id=o.clip_job_id,
-                amount_cents=o.amount_cents,
-                status=o.status.value,
-                customer_note=o.customer_note,
-                clip_status=job.status.value if job else None,
-            )
-        )
-    return out
+    return [_order_out(session, o) for o in orders]
 
 
 @router.post("/admin/{order_id}/mark-paid", response_model=OrderOut)
@@ -92,15 +101,7 @@ def admin_mark_paid(
         raise HTTPException(404, "Pedido não encontrado")
     mark_order_paid(session, order, provider="manual", payload={"source": "admin"})
     session.refresh(order)
-    job = session.get(ClipJob, order.clip_job_id)
-    return OrderOut(
-        id=order.id,
-        clip_job_id=order.clip_job_id,
-        amount_cents=order.amount_cents,
-        status=order.status.value,
-        customer_note=order.customer_note,
-        clip_status=job.status.value if job else None,
-    )
+    return _order_out(session, order)
 
 
 @router.post("/admin/{order_id}/cancel", response_model=OrderOut)
@@ -117,12 +118,4 @@ def admin_cancel(
     session.add(order)
     session.commit()
     session.refresh(order)
-    job = session.get(ClipJob, order.clip_job_id)
-    return OrderOut(
-        id=order.id,
-        clip_job_id=order.clip_job_id,
-        amount_cents=order.amount_cents,
-        status=order.status.value,
-        customer_note=order.customer_note,
-        clip_status=job.status.value if job else None,
-    )
+    return _order_out(session, order)
