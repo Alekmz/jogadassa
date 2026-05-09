@@ -1,0 +1,10 @@
+# Configuração mínima do mediamtx para o smoke E2E.
+# Aceita publicação RTSP anônima nos paths cam1..cam4 (publishers ffmpeg do compose).
+logLevel: warn
+rtsp: yes
+rtspAddress: :8554
+paths:
+  cam1:
+  cam2:
+  cam3:
+  cam4:

@@ -44,6 +44,10 @@ def _sqlite_migrate_clipjob() -> None:
             )
         if "triggered_at_utc" not in col_names:
             conn.execute(text("ALTER TABLE clipjob ADD COLUMN triggered_at_utc TIMESTAMP"))
+        if "button_id" not in col_names:
+            conn.execute(text("ALTER TABLE clipjob ADD COLUMN button_id VARCHAR(16)"))
+        if "camera_id" not in col_names:
+            conn.execute(text("ALTER TABLE clipjob ADD COLUMN camera_id VARCHAR(32)"))
 
 
 def init_db() -> None:

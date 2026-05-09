@@ -159,9 +159,13 @@ def main() -> None:
     if not rtsp:
         log.error("RTSP_URL não definido")
         sys.exit(1)
+    camera_id = os.environ.get("CAMERA_ID")
+    if not camera_id:
+        log.error("CAMERA_ID não definido")
+        sys.exit(1)
     data = Path(os.environ.get("DATA_DIR", "/data"))
-    segments = data / "segments"
-    health_path = data / "health.json"
+    segments = data / "segments" / camera_id
+    health_path = data / f"health-{camera_id}.json"
     segment_seconds = env_int("SEGMENT_SECONDS", 300)
     retention_days = env_int("RETENTION_DAYS", 14)
     retention_interval_h = env_float("RETENTION_INTERVAL_HOURS", 1.0)

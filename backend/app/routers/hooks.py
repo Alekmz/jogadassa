@@ -14,33 +14,50 @@ from app.models import ClipJob, ClipJobSource, utcnow
 router = APIRouter(prefix="/hooks", tags=["hooks"])
 
 
-@router.post("/replay-trigger")
+@router.post("/replay-trigger/{button_id}")
 def replay_trigger(
+    button_id: str,
     session: DbSession,
     x_replay_secret: str | None = Header(default=None, alias="X-Replay-Secret"),
 ):
     """
-    Cria um job de corte dos últimos N segundos (REPLAY_TRIGGER_WINDOW_SECONDS).
+    Cria 1 job de corte por câmera conectada ao botão (últimos N segundos).
     Protegido por X-Replay-Secret (mesmo valor que REPLAY_HOOK_SECRET).
     """
     s = get_settings()
     if not x_replay_secret or x_replay_secret != s.replay_hook_secret:
         raise HTTPException(status_code=401, detail="Segredo inválido")
+    cameras = s.button_camera_map.get(button_id)
+    if not cameras:
+        raise HTTPException(status_code=404, detail=f"Botão desconhecido: {button_id}")
     end = utcnow()
     start = end - timedelta(seconds=s.replay_trigger_window_seconds)
-    job = ClipJob(
-        start_utc=start,
-        end_utc=end,
-        source=ClipJobSource.replay_trigger,
-        triggered_at_utc=end,
-    )
-    session.add(job)
+    jobs: list[ClipJob] = []
+    for camera_id in cameras:
+        job = ClipJob(
+            start_utc=start,
+            end_utc=end,
+            source=ClipJobSource.replay_trigger,
+            triggered_at_utc=end,
+            button_id=button_id,
+            camera_id=camera_id,
+        )
+        session.add(job)
+        jobs.append(job)
     session.commit()
-    session.refresh(job)
+    for job in jobs:
+        session.refresh(job)
     return {
-        "id": job.id,
-        "start_utc": job.start_utc,
-        "end_utc": job.end_utc,
-        "status": job.status.value,
-        "source": job.source.value,
+        "button_id": button_id,
+        "jobs": [
+            {
+                "id": j.id,
+                "camera_id": j.camera_id,
+                "start_utc": j.start_utc,
+                "end_utc": j.end_utc,
+                "status": j.status.value,
+                "source": j.source.value,
+            }
+            for j in jobs
+        ],
     }

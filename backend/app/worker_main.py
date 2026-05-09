@@ -48,10 +48,15 @@ def claim_next(session: Session) -> ClipJob | None:
 
 def run_job(session: Session, job: ClipJob) -> None:
     s = get_settings()
-    segments_dir = Path(s.segments_dir)
-    clips_dir = Path(s.clips_dir)
     name = f"clip_{job.id}.mp4"
-    rel = f"clips/{name}"
+    if job.camera_id and job.button_id:
+        segments_dir = Path(s.segments_dir) / job.camera_id
+        clips_dir = Path(s.clips_dir) / f"btn{job.button_id}" / job.camera_id
+        rel = f"clips/btn{job.button_id}/{job.camera_id}/{name}"
+    else:
+        segments_dir = Path(s.segments_dir)
+        clips_dir = Path(s.clips_dir)
+        rel = f"clips/{name}"
     try:
         export_clip_mp4(
             segments_dir,

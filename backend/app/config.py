@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     payment_webhook_secret: str = "webhook-secret-change"
     # Fluxo comercial: custom (padrão) — use customer_order.metadata_json para regras específicas
     business_mode: str = "custom"
+    # 2 botões × 2 câmeras: mapeamento botão → câmeras (CSV de IDs)
+    button1_cameras: str = "cam1,cam2"
+    button2_cameras: str = "cam3,cam4"
 
     @property
     def segments_dir(self) -> str:
@@ -31,6 +34,16 @@ class Settings(BaseSettings):
     @property
     def clips_dir(self) -> str:
         return f"{self.data_dir.rstrip('/')}/clips"
+
+    @property
+    def button_camera_map(self) -> dict[str, list[str]]:
+        def _parse(csv: str) -> list[str]:
+            return [c.strip() for c in csv.split(",") if c.strip()]
+
+        return {
+            "1": _parse(self.button1_cameras),
+            "2": _parse(self.button2_cameras),
+        }
 
 
 @lru_cache

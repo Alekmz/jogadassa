@@ -1,16 +1,66 @@
+x-recorder-base: &recorder-base
+  build:
+    context: ./recorder
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  volumes:
+    - replay_data:/data
+
+x-bridge-base: &bridge-base
+  profiles:
+    - bridge
+  build:
+    context: ./scripts
+    dockerfile: Dockerfile.replay-bridge
+  restart: unless-stopped
+  depends_on:
+    - api
+
+x-publisher-base: &publisher-base
+  profiles:
+    - smoke
+  image: linuxserver/ffmpeg:latest
+  restart: unless-stopped
+  depends_on:
+    - mediamtx
+  entrypoint: ["/usr/local/bin/ffmpeg"]
+
 services:
-  recorder:
-    build:
-      context: ./recorder
-      dockerfile: Dockerfile
-    restart: unless-stopped
+  recorder-cam1:
+    <<: *recorder-base
     environment:
-      RTSP_URL: ${RTSP_URL:?set RTSP_URL in .env}
+      RTSP_URL: ${RTSP_URL_CAM1:?set RTSP_URL_CAM1 in .env}
+      CAMERA_ID: cam1
       DATA_DIR: /data
       SEGMENT_SECONDS: ${SEGMENT_SECONDS:-300}
       RETENTION_DAYS: ${RETENTION_DAYS:-14}
-    volumes:
-      - replay_data:/data
+
+  recorder-cam2:
+    <<: *recorder-base
+    environment:
+      RTSP_URL: ${RTSP_URL_CAM2:?set RTSP_URL_CAM2 in .env}
+      CAMERA_ID: cam2
+      DATA_DIR: /data
+      SEGMENT_SECONDS: ${SEGMENT_SECONDS:-300}
+      RETENTION_DAYS: ${RETENTION_DAYS:-14}
+
+  recorder-cam3:
+    <<: *recorder-base
+    environment:
+      RTSP_URL: ${RTSP_URL_CAM3:?set RTSP_URL_CAM3 in .env}
+      CAMERA_ID: cam3
+      DATA_DIR: /data
+      SEGMENT_SECONDS: ${SEGMENT_SECONDS:-300}
+      RETENTION_DAYS: ${RETENTION_DAYS:-14}
+
+  recorder-cam4:
+    <<: *recorder-base
+    environment:
+      RTSP_URL: ${RTSP_URL_CAM4:?set RTSP_URL_CAM4 in .env}
+      CAMERA_ID: cam4
+      DATA_DIR: /data
+      SEGMENT_SECONDS: ${SEGMENT_SECONDS:-300}
+      RETENTION_DAYS: ${RETENTION_DAYS:-14}
 
   api:
     build:
@@ -32,6 +82,8 @@ services:
       REPLAY_TRIGGER_WINDOW_SECONDS: ${REPLAY_TRIGGER_WINDOW_SECONDS:-30}
       REPLAY_HOOK_SECRET: ${REPLAY_HOOK_SECRET:-dev-replay-secret-change-me}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      BUTTON1_CAMERAS: ${BUTTON1_CAMERAS:-cam1,cam2}
+      BUTTON2_CAMERAS: ${BUTTON2_CAMERAS:-cam3,cam4}
     volumes:
       - replay_data:/data
 
@@ -45,27 +97,152 @@ services:
       DATABASE_URL: sqlite:////data/app.db
       DATA_DIR: /data
       SEGMENT_SECONDS: ${SEGMENT_SECONDS:-300}
+      BUTTON1_CAMERAS: ${BUTTON1_CAMERAS:-cam1,cam2}
+      BUTTON2_CAMERAS: ${BUTTON2_CAMERAS:-cam3,cam4}
     volumes:
       - replay_data:/data
 
-  # USB Serial → POST /hooks/replay-trigger (perfil bridge). Ative com COMPOSE_PROFILES=bridge no .env ou: docker compose --profile bridge up
-  replay-bridge:
-    profiles:
-      - bridge
-    build:
-      context: ./scripts
-      dockerfile: Dockerfile.replay-bridge
-    restart: unless-stopped
-    depends_on:
-      - api
+  # USB Serial → POST /hooks/replay-trigger/{button_id} (perfil bridge).
+  # Ative com COMPOSE_PROFILES=bridge no .env ou: docker compose --profile bridge up
+  replay-bridge-1:
+    <<: *bridge-base
     environment:
       SERIAL_PORT: /dev/ttyUSB0
       SERIAL_BAUD: ${SERIAL_BAUD:-115200}
-      REPLAY_URL: http://api:8000/hooks/replay-trigger
+      REPLAY_URL: http://api:8000/hooks/replay-trigger/1
       REPLAY_HOOK_SECRET: ${REPLAY_HOOK_SECRET:-dev-replay-secret-change-me}
       REPLAY_SERIAL_COMMAND: ${REPLAY_SERIAL_COMMAND:-REPLAY_CUT}
     devices:
-      - ${SERIAL_DEVICE:-/dev/ttyUSB0}:/dev/ttyUSB0
+      - ${SERIAL_DEVICE_BUTTON1:-/dev/ttyUSB0}:/dev/ttyUSB0
+
+  replay-bridge-2:
+    <<: *bridge-base
+    environment:
+      SERIAL_PORT: /dev/ttyUSB0
+      SERIAL_BAUD: ${SERIAL_BAUD:-115200}
+      REPLAY_URL: http://api:8000/hooks/replay-trigger/2
+      REPLAY_HOOK_SECRET: ${REPLAY_HOOK_SECRET:-dev-replay-secret-change-me}
+      REPLAY_SERIAL_COMMAND: ${REPLAY_SERIAL_COMMAND:-REPLAY_CUT}
+    devices:
+      - ${SERIAL_DEVICE_BUTTON2:-/dev/ttyUSB1}:/dev/ttyUSB0
+
+  # Suíte de testes (unit + integration) — ffmpeg + pytest na mesma imagem.
+  # Uso: docker compose --profile test run --rm tests
+  tests:
+    profiles:
+      - test
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.tests
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+    command: ["pytest", "-v"]
+
+  # === Smoke E2E (perfil smoke): RTSP fake + 4 publishers que substituem as câmeras ===
+  # Uso: docker compose --env-file .env.smoke --profile smoke up -d --build
+  mediamtx:
+    profiles:
+      - smoke
+    image: bluenviron/mediamtx:latest
+    restart: unless-stopped
+    volumes:
+      - ./mediamtx/mediamtx.yml:/mediamtx.yml:ro
+
+  publisher-cam1:
+    <<: *publisher-base
+    command:
+      - -re
+      - -f
+      - lavfi
+      - -i
+      - testsrc=size=640x360:rate=15
+      - -f
+      - lavfi
+      - -i
+      - sine=frequency=440
+      - -c:v
+      - libx264
+      - -preset
+      - ultrafast
+      - -tune
+      - zerolatency
+      - -c:a
+      - aac
+      - -f
+      - rtsp
+      - rtsp://mediamtx:8554/cam1
+
+  publisher-cam2:
+    <<: *publisher-base
+    command:
+      - -re
+      - -f
+      - lavfi
+      - -i
+      - testsrc=size=640x360:rate=15
+      - -f
+      - lavfi
+      - -i
+      - sine=frequency=523
+      - -c:v
+      - libx264
+      - -preset
+      - ultrafast
+      - -tune
+      - zerolatency
+      - -c:a
+      - aac
+      - -f
+      - rtsp
+      - rtsp://mediamtx:8554/cam2
+
+  publisher-cam3:
+    <<: *publisher-base
+    command:
+      - -re
+      - -f
+      - lavfi
+      - -i
+      - testsrc=size=640x360:rate=15
+      - -f
+      - lavfi
+      - -i
+      - sine=frequency=659
+      - -c:v
+      - libx264
+      - -preset
+      - ultrafast
+      - -tune
+      - zerolatency
+      - -c:a
+      - aac
+      - -f
+      - rtsp
+      - rtsp://mediamtx:8554/cam3
+
+  publisher-cam4:
+    <<: *publisher-base
+    command:
+      - -re
+      - -f
+      - lavfi
+      - -i
+      - testsrc=size=640x360:rate=15
+      - -f
+      - lavfi
+      - -i
+      - sine=frequency=784
+      - -c:v
+      - libx264
+      - -preset
+      - ultrafast
+      - -tune
+      - zerolatency
+      - -c:a
+      - aac
+      - -f
+      - rtsp
+      - rtsp://mediamtx:8554/cam4
 
 volumes:
   replay_data:

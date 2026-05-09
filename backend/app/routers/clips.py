@@ -27,6 +27,8 @@ class ClipOut(BaseModel):
     status: str
     source: str
     triggered_at_utc: datetime | None
+    button_id: str | None
+    camera_id: str | None
     output_relpath: str | None
     error_text: str | None
     download_token: str | None = None
@@ -73,6 +75,8 @@ def _clip_out(job: ClipJob, include_token: bool = False) -> ClipOut:
         status=job.status.value,
         source=job.source.value,
         triggered_at_utc=job.triggered_at_utc,
+        button_id=job.button_id,
+        camera_id=job.camera_id,
         output_relpath=job.output_relpath,
         error_text=job.error_text,
         download_token=token,

@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
 Bridge USB Serial → HTTP: lê linhas da porta serial (ex.: ESP32 com botão) e chama
-POST /hooks/replay-trigger na API jogadassa.
+POST /hooks/replay-trigger/{button_id} na API jogadassa. A identidade do botão vive na
+URL configurada (cada instância do bridge aponta para o button_id correspondente — o
+firmware do ESP32 é o mesmo nos dois botões).
 
 Dependência: pip install pyserial
 
 Variáveis de ambiente (sobrescritas por argumentos de linha de comando):
   SERIAL_PORT          — obrigatório se não passar --port (ex.: /dev/ttyUSB0, COM3)
-  REPLAY_URL           — default http://127.0.0.1:8000/hooks/replay-trigger
+  REPLAY_URL           — obrigatório, ex.: http://127.0.0.1:8000/hooks/replay-trigger/1
   REPLAY_HOOK_SECRET   — obrigatório (mesmo valor da API)
   SERIAL_BAUD          — default 115200
   REPLAY_SERIAL_COMMAND — texto da linha que dispara o POST (default REPLAY_CUT)
@@ -51,12 +53,12 @@ def post_replay(url: str, secret: str) -> tuple[int, str]:
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="Serial → POST /hooks/replay-trigger")
+    p = argparse.ArgumentParser(description="Serial → POST /hooks/replay-trigger/{button_id}")
     p.add_argument("--port", default=_env("SERIAL_PORT"), help="Porta serial (ou env SERIAL_PORT)")
     p.add_argument(
         "--url",
-        default=_env("REPLAY_URL", "http://127.0.0.1:8000/hooks/replay-trigger"),
-        help="URL do hook (ou env REPLAY_URL)",
+        default=_env("REPLAY_URL"),
+        help="URL completa do hook incl. button_id, ex.: http://127.0.0.1:8000/hooks/replay-trigger/1 (ou env REPLAY_URL)",
     )
     p.add_argument(
         "--secret",
@@ -78,6 +80,9 @@ def main() -> int:
 
     if not args.port:
         print("Defina SERIAL_PORT ou use --port", file=sys.stderr)
+        return 2
+    if not args.url:
+        print("Defina REPLAY_URL ou use --url (incluindo /{button_id} no final)", file=sys.stderr)
         return 2
     if not args.secret:
         print("Defina REPLAY_HOOK_SECRET ou use --secret", file=sys.stderr)

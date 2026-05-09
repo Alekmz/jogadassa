@@ -40,6 +40,8 @@ class ClipJob(SQLModel, table=True):
     status: ClipJobStatus = ClipJobStatus.queued
     source: ClipJobSource = Field(default=ClipJobSource.legacy)
     triggered_at_utc: Optional[datetime] = None
+    button_id: Optional[str] = None
+    camera_id: Optional[str] = None
     output_relpath: Optional[str] = None
     error_text: Optional[str] = None
     created_at: datetime = Field(default_factory=utcnow)
